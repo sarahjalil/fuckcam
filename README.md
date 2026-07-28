@@ -62,7 +62,7 @@ git clone https://github.com/sarahjalil/fuckcam.git
 cd fuckcam
 
 # Make the script executable
-chmod +x bash.sh
+chmod +x omeng.sh
 
 # Run the launcher
-./bash.sh
+./omeng.sh
